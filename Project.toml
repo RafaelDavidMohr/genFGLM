@@ -1,0 +1,11 @@
+name = "genFGLM"
+uuid = "dac74291-1534-48c6-8d2d-ea0829d902be"
+authors = ["Rafael Mohr <Rafael.Mohr@lip6.fr>"]
+version = "0.1.0"
+
+[deps]
+AbstractTrees = "1520ce14-60c1-5f80-bbc7-55ef81b5835c"
+Groebner = "0b43b601-686d-58a3-8a1c-6623616c7cd4"
+Oscar = "f1435218-dba5-11e9-1e4d-f1a5fab5fc13"
+Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
+Reexport = "189a3867-3050-52da-a836-e630ba90ab69"
