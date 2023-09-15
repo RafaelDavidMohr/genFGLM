@@ -4,6 +4,8 @@ using Reexport
 @reexport using Oscar
 using Groebner, AbstractTrees, Printf
 
+export critical_points, cyclic, gen_fglm, ed_variety 
+
 const POL = MPolyElem
 
 # type used for a canditate lifted element
