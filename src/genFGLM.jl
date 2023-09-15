@@ -4,7 +4,7 @@ using Reexport
 @reexport using Oscar
 using Groebner, AbstractTrees, Printf
 
-export critical_points, cyclic, gen_fglm, ed_variety 
+export critical_points, cyclic, gen_fglm, ed_variety, rand_poly_dense, rand_poly_sparse 
 
 const POL = MPolyElem
 
@@ -133,7 +133,7 @@ end
 
 # main function
 function gen_fglm(I::Ideal{P};
-                  target_order = Lex(),
+                  target_order = :lex,
                   ind_set = P[],
                   switch_to_generic = true) where {P <: POL}
 
@@ -169,7 +169,7 @@ function gen_fglm(I::Ideal{P};
         end
         I_new = ideal(R, [f(ev...) for f in gens(I)])
         println("Computing initial DRL GB...")
-        gb = gens(groebner_basis_f4(I_new, complete_reduction = true, info_level = 2))
+        gb = gens(groebner_basis_f4(I_new, complete_reduction = true))
     else
         I_new = I
         gb = gb_1
@@ -177,10 +177,10 @@ function gen_fglm(I::Ideal{P};
     # ----
     
     println("Computing initial target staircase...")
-    if target_order == Lex()
+    if target_order == :lex
         gb_1 = groebner(vcat(gens(I_new), free_vars), ordering = target_order)
         target_staircase = staircase(gb_1, lex(R)) 
-    elseif target_order == DegRevLex()
+    elseif target_order == :degrevlex
         gb_1 = gens(groebner_basis_f4(I_new + ideal(R, free_vars), complete_reduction = true))
         target_staircase = staircase(gb_1, degrevlex(R))
     else
@@ -216,8 +216,8 @@ function gen_fglm(I::Ideal{P};
         while curr_deg <= d
             append!(full, mons)
             for i in 1:length(mons)
-                println("current degree $(curr_deg)")
                 u = mons[i]
+                println("current degree $(curr_deg), u = $(u)")
                 pt_id = point_ideal(i, mons, next_deg_mons)
                 slice = u .* target_staircase
 
@@ -229,8 +229,12 @@ function gen_fglm(I::Ideal{P};
                 staircase!(leadmons, drl_staircase, montree, one(R))
 
                 println("computing normal forms...")
-                C = coeff_vectors(gb_u, drl_staircase, slice)
-                D = coeff_vectors(gb_u, drl_staircase, [f.curr for f in to_lift])
+                slice_nfs = Oscar.reduce(slice, gb_u)
+                C = coeff_vectors(gb_u, drl_staircase, slice_nfs,
+                                  is_reduced = true)
+                lift_nfs = Oscar.reduce([f.curr for f in to_lift], gb_u)
+                D = coeff_vectors(gb_u, drl_staircase, lift_nfs,
+                                  is_reduced = true)
                 to_del = Int[]
                 println("testing for stability (normal form)")
                 for (j, dd) in enumerate(D)
@@ -243,21 +247,29 @@ function gen_fglm(I::Ideal{P};
                 println("$(length(to_del))/$(length(to_lift)) stable elements (normal form)")
                 deleteat!(to_lift, to_del)
                 deleteat!(D, to_del)
+                deleteat!(lift_nfs, to_del)
                 isempty(to_lift) && break
 
-                sz = 0
-                nzsz = 0
-                for x in matrix(R,C)
-                    sz += 1
-                    if !iszero(x)
-                        nzsz += 1
+                trivial_lifting = all(slice .== slice_nfs)
+
+                if !trivial_lifting
+                    sz = 0
+                    nzsz = 0
+                    for x in matrix(R,C)
+                        sz += 1
+                        if !iszero(x)
+                            nzsz += 1
+                        end
                     end
+                    dens = nzsz/sz
+                    sze = size(transpose(matrix(R,C)))
+                    @printf "lifting %i elements, mat of size %i x %i, density %2.2f%%\n" length(to_lift) sze[1] sze[2] dens
+                    hassol, vs = can_solve_with_solution(transpose(matrix(R, C)),transpose(matrix(R, D)))
+                    !hassol && error("unliftable elements")
+                else
+                    println("trivial lifting step")
+                    vs = transpose(matrix(R, coeff_vectors(gb_u, slice, lift_nfs)))
                 end
-                dens = nzsz/sz
-                sze = size(transpose(matrix(R,C)))
-                @printf "lifting %i elements, mat of size %i x %i, density %2.2f%%\n" length(to_lift) sze[1] sze[2] dens
-                hassol, vs = can_solve_with_solution(transpose(matrix(R, C)),transpose(matrix(R, D)))
-                !hassol && error("unliftable elements")
 
                 empty!(to_del)
                 n_stable_elements = 0
@@ -281,6 +293,7 @@ function gen_fglm(I::Ideal{P};
                             continue
                         end
                     end
+                    f_old = f.curr
                     f.curr = f.curr - sum(vs[:, j] .* slice)
                     f.pades = [(zero(R), one(R)) for _ in 1:length(f.support)]
                 end
@@ -417,13 +430,14 @@ end
 function coeff_vectors(gb::Vector{P},
                        vec_basis::Vector{P},
                        F::Vector{P};
-                       ordering = DegRevLex()) where {P <: POL}
+                       is_reduced = false) where {P <: POL}
     
     # TODO: normalform randomly does not work
     # nfs = normalform(gb, F, ordering = ordering)
-    nfs = Oscar.reduce(F, gb)
-    for (f, nf) in zip(F, nfs)
-        println("$f --> $(nf)")
+    nfs = if !is_reduced
+        Oscar.reduce(F, gb)
+    else
+        F
     end
     return [[coeff(g,m) for m in vec_basis] for g in nfs]
 end
