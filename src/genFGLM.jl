@@ -1,5 +1,6 @@
 module genFGLM
 
+using Base: test_success
 using Reexport
 @reexport using Oscar
 using Groebner, AbstractTrees, Printf
@@ -211,120 +212,128 @@ function gen_fglm(I::Ideal{P};
 
     drl_staircase = [one(R)]
     montree = MonomialNode(true, 1, MonomialNode[])
+
+    test_lift = true
     
     while !isempty(to_lift)
-        while curr_deg <= d
-            append!(full, mons)
-            for i in 1:length(mons)
-                u = mons[i]
-                println("current degree $(curr_deg), u = $(u)")
-                pt_id = point_ideal(i, mons, next_deg_mons)
-                slice = u .* target_staircase
+        if test_lift
+            println("doing a test lift")
+            U = [first(mons)]
+            append!(full, U)
+            pt_id = point_ideal(1, mons, next_deg_mons)
+        else
+            println("lifting to degree $d")
+            lowb = d == 2 ? 2 : Int(d/2) + 2
+            U = vcat(mons[2:end],
+                     [mons_of_deg_d(free_vars, e) for e in lowb:d]...)
+            append!(full, U)
+            pt_id = mons_of_deg_d(free_vars, d+1)
+        end
+        println("computing DRL GB...")
+        gb_u = gens(groebner_basis_f4(ideal(R, vcat(gb, pt_id)),
+                                      complete_reduction = true))
+        println("computing staircase...")
+        leadmons = (leading_monomial).(gb_u)
+        staircase!(leadmons, drl_staircase, montree, one(R))
 
-                println("computing DRL GB...")
-                gb_u = gens(groebner_basis_f4(ideal(R, vcat(gb, pt_id)),
-                                              complete_reduction = true))
-                println("computing staircase...")
-                leadmons = (leading_monomial).(gb_u)
-                staircase!(leadmons, drl_staircase, montree, one(R))
+        println("computing normal forms...")
+        slice = vcat([u .* target_staircase for u in U]...)
+        slice_nfs = Oscar.reduce(slice, gb_u)
+        C = coeff_vectors(gb_u, drl_staircase, slice_nfs,
+                          is_reduced = true)
+        lift_nfs = Oscar.reduce([f.curr for f in to_lift], gb_u)
+        D = coeff_vectors(gb_u, drl_staircase, lift_nfs,
+                          is_reduced = true)
 
-                println("computing normal forms...")
-                slice_nfs = Oscar.reduce(slice, gb_u)
-                C = coeff_vectors(gb_u, drl_staircase, slice_nfs,
-                                  is_reduced = true)
-                lift_nfs = Oscar.reduce([f.curr for f in to_lift], gb_u)
-                D = coeff_vectors(gb_u, drl_staircase, lift_nfs,
-                                  is_reduced = true)
-                to_del = Int[]
-                println("testing for stability (normal form)")
-                for (j, dd) in enumerate(D)
-                    f = to_lift[j]
-                    if iszero(dd)
-                        push!(result, Rloc(f.curr))
-                        push!(to_del, j)
-                    end
+        if test_lift
+            to_del = Int[]
+            println("testing for stability (normal form)")
+            for (j, dd) in enumerate(D)
+                f = to_lift[j]
+                if iszero(dd)
+                    push!(result, Rloc(f.curr))
+                    push!(to_del, j)
                 end
-                println("$(length(to_del))/$(length(to_lift)) stable elements (normal form)")
-                deleteat!(to_lift, to_del)
-                deleteat!(D, to_del)
-                deleteat!(lift_nfs, to_del)
-                isempty(to_lift) && break
-
-                trivial_lifting = all(slice .== slice_nfs)
-
-                if !trivial_lifting
-                    sz = 0
-                    nzsz = 0
-                    for x in matrix(R,C)
-                        sz += 1
-                        if !iszero(x)
-                            nzsz += 1
-                        end
-                    end
-                    dens = nzsz/sz
-                    sze = size(transpose(matrix(R,C)))
-                    @printf "lifting %i elements, mat of size %i x %i, density %2.2f%%\n" length(to_lift) sze[1] sze[2] dens
-                    hassol, vs = can_solve_with_solution(transpose(matrix(R, C)),transpose(matrix(R, D)))
-                    !hassol && error("unliftable elements")
-                else
-                    println("trivial lifting step")
-                    vs = transpose(matrix(R, coeff_vectors(gb_u, slice, lift_nfs)))
-                end
-
-                empty!(to_del)
-                n_stable_elements = 0
-                n_tried = 0
-                println("testing stability (pade)")
-                for (j, f) in enumerate(to_lift)
-                    if all(!iszero, [p[1] for p in f.pades])
-                        n_tried += 1
-                        pss = [coeff(f.curr, n_free_vars, m)
-                               for m in f.support]
-                        next_cfs = [extract_coefficient(cf, p[1], p[2], u,
-                                                        free_vars)
-                                    for (cf, p) in zip(pss, f.pades)]
-                        # TODO: this is a really dumb idea
-                        if all(cf -> -cf in next_cfs, vs[:, j]) 
-                            n_stable_elements += 1
-                            p = f.pades
-                            push!(result, sum([(Rloc(p[k][1])/Rloc(p[k][2]))*Rloc(prod(n_free_vars .^ m))
-                                               for (k, m) in enumerate(f.support)]))
-                            push!(to_del, j)
-                            continue
-                        end
-                    end
-                    f_old = f.curr
-                    f.curr = f.curr - sum(vs[:, j] .* slice)
-                    f.pades = [(zero(R), one(R)) for _ in 1:length(f.support)]
-                end
-                println("------")
-                println("$(n_stable_elements)/$(n_tried) elements with stable pade approximation")
-                deleteat!(to_lift, to_del)
-                isempty(to_lift) && break
             end
+            println("$(length(to_del))/$(length(to_lift)) stable elements (normal form)")
+            deleteat!(to_lift, to_del)
+            deleteat!(D, to_del)
+            deleteat!(lift_nfs, to_del)
             isempty(to_lift) && break
-            curr_deg += 1
-            mons = next_deg_mons
-            next_deg_mons = unique(vcat([v .* mons for v in free_vars]...))
         end
-        isempty(to_lift) && break
 
-        println("starting pade approximations for $(length(to_lift)) elements")
-        i = findfirst(m -> total_degree(m) > d/2, full)
-        half = full[1:(i-1)]
-        full_pl_one = mons
-        for f in to_lift
-            pades = [pade(coeff(f.curr, n_free_vars, m),
-                          full, half, full_pl_one)
-                     for m in f.support]
-            any(p -> all(iszero, p), pades) && continue
-            f.pades = pades
+        trivial_lifting = all(slice .== slice_nfs)
+
+        if !trivial_lifting
+            sz = 0
+            nzsz = 0
+            for x in matrix(R,C)
+                sz += 1
+                if !iszero(x)
+                    nzsz += 1
+                end
+            end
+            dens = nzsz/sz
+            sze = size(transpose(matrix(R,C)))
+            @printf "lifting %i elements, mat of size %i x %i, density %2.2f%%\n" length(to_lift) sze[1] sze[2] dens
+            hassol, vs = can_solve_with_solution(transpose(matrix(R, C)),transpose(matrix(R, D)))
+            !hassol && error("unliftable elements")
+        else
+            println("trivial lifting step")
+            vs = transpose(matrix(R, coeff_vectors(gb_u, slice, lift_nfs)))
         end
+
+        if test_lift
+            u = first(U)
+            empty!(to_del)
+            n_stable_elements = 0
+            n_tried = 0
+            println("testing stability (pade)")
+            for (j, f) in enumerate(to_lift)
+                if all(!iszero, [p[1] for p in f.pades])
+                    n_tried += 1
+                    pss = [coeff(f.curr, n_free_vars, m)
+                           for m in f.support]
+                    next_cfs = [extract_coefficient(cf, p[1], p[2], u,
+                                                    free_vars)
+                                for (cf, p) in zip(pss, f.pades)]
+                    # TODO: this is a really dumb idea
+                    if all(cf -> -cf in next_cfs, vs[:, j]) 
+                        n_stable_elements += 1
+                        p = f.pades
+                        push!(result, sum([(Rloc(p[k][1])/Rloc(p[k][2]))*Rloc(prod(n_free_vars .^ m))
+                                           for (k, m) in enumerate(f.support)]))
+                        push!(to_del, j)
+                        continue
+                    else
+                        f.pades = [(zero(R), one(R)) for _ in 1:length(f.support)]
+                    end
+                end
+            end
+            println("$(n_stable_elements)/$(n_tried) elements with stable pade approximation")
+            deleteat!(to_lift, to_del)
+            isempty(to_lift) && break
+        end
+        [f.curr = f.curr - sum(vs[:, j] .* slice) for (j, f) in
+             enumerate(to_lift)]
+        if !test_lift
+            println("starting pade approximations for $(length(to_lift)) elements")
+            i = findlast(m -> total_degree(m) <= d/2, full)
+            half = full[1:i]
+            for f in to_lift
+                pades = [pade(coeff(f.curr, n_free_vars, m),
+                              full, half, pt_id)
+                         for m in f.support]
+                any(p -> all(iszero, p), pades) && continue
+                f.pades = pades
+            end
+            mons = pt_id
+            next_deg_mons = mons_of_deg_d(free_vars, d+2)
+            d *= 2
+            println("doubling degree to $(d)")
+        end
+        test_lift = !test_lift
         println("------")
-
-        # double the degree to which we lift
-        d *= 2
-        println("doubling degree to $(d)")
     end
     return result
 end
