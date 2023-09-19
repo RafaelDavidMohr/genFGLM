@@ -265,9 +265,12 @@ function gen_fglm(I::Ideal{P};
         trivial_lifting = all(slice .== slice_nfs)
 
         if !trivial_lifting
+            FF = base_ring(R)
+            CC = matrix(FF, C)
+            DD = matrix(FF, D)
             sz = 0
             nzsz = 0
-            for x in matrix(R,C)
+            for x in CC
                 sz += 1
                 if !iszero(x)
                     nzsz += 1
@@ -276,7 +279,7 @@ function gen_fglm(I::Ideal{P};
             dens = nzsz/sz
             sze = size(transpose(matrix(R,C)))
             @printf "lifting %i elements, mat of size %i x %i, density %2.2f%%\n" length(to_lift) sze[1] sze[2] dens
-            hassol, vs = can_solve_with_solution(transpose(matrix(R, C)),transpose(matrix(R, D)))
+            hassol, vs = can_solve_with_solution(transpose(matrix(FF, C)),transpose(matrix(FF, D)))
             !hassol && error("unliftable elements")
         else
             println("trivial lifting step")
