@@ -182,7 +182,7 @@ function gen_fglm(I::Ideal{P};
         gb_1 = groebner(vcat(gens(I_new), free_vars), ordering = target_order)
         target_staircase = staircase(gb_1, lex(R)) 
     elseif target_order == :degrevlex
-        gb_1 = gens(groebner_basis_f4(I_new + ideal(R, free_vars), complete_reduction = true))
+        gb_1 = gens(groebner_basis_f4(I_new + ideal(R, free_vars), complete_reduction = true, info_level = 2))
         target_staircase = staircase(gb_1, degrevlex(R))
     else
         error("target ordering not supported")
@@ -231,7 +231,8 @@ function gen_fglm(I::Ideal{P};
         end
         println("computing DRL GB...")
         gb_u = gens(groebner_basis_f4(ideal(R, vcat(gb, pt_id)),
-                                      complete_reduction = true))
+                                      complete_reduction = true,
+                                      info_level = 2))
         println("computing staircase...")
         leadmons = (leading_monomial).(gb_u)
         staircase!(leadmons, drl_staircase, montree, one(R))
