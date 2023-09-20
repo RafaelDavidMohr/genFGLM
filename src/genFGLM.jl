@@ -1,6 +1,5 @@
 module genFGLM
 
-using Base: test_success
 using Reexport
 @reexport using Oscar
 using Groebner, AbstractTrees, Printf
@@ -280,12 +279,14 @@ function gen_fglm(I::Ideal{P};
             dens = nzsz/sz
             sze = size(transpose(matrix(R,C)))
             @printf "lifting %i elements, mat of size %i x %i, density %2.2f%%\n" length(to_lift) sze[1] sze[2] dens
-            hassol, vs = can_solve_with_solution(transpose(matrix(FF, C)),transpose(matrix(FF, D)))
+            hassol, vs = can_solve_with_solution(transpose(CC),transpose(DD))
             !hassol && error("unliftable elements")
         else
             println("trivial lifting step")
             vs = transpose(matrix(R, coeff_vectors(gb_u, slice, lift_nfs)))
         end
+
+        lifts = [vs[:, j] for j in 1:size(vs, 2)]
 
         if test_lift
             u = first(U)
@@ -302,7 +303,7 @@ function gen_fglm(I::Ideal{P};
                                                     free_vars)
                                 for (cf, p) in zip(pss, f.pades)]
                     # TODO: this is a really dumb idea
-                    if all(cf -> -cf in next_cfs, vs[:, j]) 
+                    if all(cf -> -cf in next_cfs, lifts[j]) 
                         n_stable_elements += 1
                         p = f.pades
                         push!(result, sum([(Rloc(p[k][1])/Rloc(p[k][2]))*Rloc(prod(n_free_vars .^ m))
@@ -316,10 +317,12 @@ function gen_fglm(I::Ideal{P};
             end
             println("$(n_stable_elements)/$(n_tried) elements with stable pade approximation")
             deleteat!(to_lift, to_del)
+            deleteat!(lifts, to_del)
             isempty(to_lift) && break
         end
-        [f.curr = f.curr - sum(vs[:, j] .* slice) for (j, f) in
-             enumerate(to_lift)]
+
+        [f.curr = f.curr - sum(l .* slice) for (l, f) in zip(lifts, to_lift)]
+        
         if !test_lift
             println("starting pade approximations for $(length(to_lift)) elements")
             i = findlast(m -> total_degree(m) <= d/2, full)
