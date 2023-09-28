@@ -279,6 +279,7 @@ function gen_fglm(I::Ideal{P};
         if length(to_del) != length(slice)
             println("non-trivial lift, dividing staircase...")
             triv_slice_part = slice[to_del]
+            println("computing remaining slice coeff vectors ($(length(slice)-length(to_del))/$(length(slice)))...")
             deleteat!(slice_nfs, to_del)
             deleteat!(slice, to_del)
             staircase_rem = [k for k in keys(drl_staircase_flagmap) if !drl_staircase_flagmap[k]]
@@ -286,7 +287,6 @@ function gen_fglm(I::Ideal{P};
                 drl_staircase_flagmap[k] = false
             end
 
-            println("computing remaining slice coeff vectors ($(length(slice) - length(to_del))/$(length(slice)))...")
             C1 = coeff_vectors(gb_u, triv_slice_part, slice_nfs, is_reduced = true)
             C2 = coeff_vectors(gb_u, staircase_rem, slice_nfs, is_reduced = true)
             println("computing lift coeff vectors...")
@@ -304,7 +304,7 @@ function gen_fglm(I::Ideal{P};
                     nzsz += 1
                 end
             end
-            dens = nzsz/sz
+            dens = 100 * nzsz/sz
             sze = size(transpose(CC2))
             @printf "lifting %i elements, mat of size %i x %i, density %2.2f%%\n" length(to_lift) sze[1] sze[2] dens
             hassol, vs2 = can_solve_with_solution(transpose(CC2),transpose(DD2))
