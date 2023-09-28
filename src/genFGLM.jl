@@ -181,7 +181,7 @@ function gen_fglm(I::Ideal{P};
         gb_1 = groebner(vcat(gens(I_new), free_vars), ordering = target_order)
         target_staircase = staircase(gb_1, lex(R)) 
     elseif target_order == :degrevlex
-        gb_1 = gens(groebner_basis_f4(I_new + ideal(R, free_vars), complete_reduction = true, info_level = 2))
+        gb_1 = gens(groebner_basis_f4(I_new + ideal(R, free_vars), complete_reduction = true, info_level = 0))
         target_staircase = staircase(gb_1, degrevlex(R))
     else
         error("target ordering not supported")
@@ -210,7 +210,10 @@ function gen_fglm(I::Ideal{P};
     full = [one(R)]
 
     drl_staircase = [one(R)]
+    # used to flag all elements in slice which are also in staircase
+    drl_staircase_flagmap = Dict{P, Bool}([(one(R), false)])
     montree = MonomialNode(true, 1, MonomialNode[])
+    to_del = Int[]
 
     test_lift = true
     
@@ -231,62 +234,92 @@ function gen_fglm(I::Ideal{P};
         println("computing DRL GB...")
         gb_u = gens(groebner_basis_f4(ideal(R, vcat(gb, pt_id)),
                                       complete_reduction = true,
-                                      info_level = 2))
+                                      info_level = 0))
         println("computing staircase...")
         leadmons = (leading_monomial).(gb_u)
+
+        prev_length = length(drl_staircase)
         staircase!(leadmons, drl_staircase, montree, one(R))
+        n_length = length(drl_staircase)
+        for j in prev_length+1:n_length
+            m = drl_staircase[j]
+            drl_staircase_flagmap[m] = false 
+        end
 
-        println("computing normal forms...")
-        slice = vcat([u .* target_staircase for u in U]...)
-        slice_nfs = Oscar.reduce(slice, gb_u)
-        C = coeff_vectors(gb_u, drl_staircase, slice_nfs,
-                          is_reduced = true)
-        lift_nfs = Oscar.reduce([f.curr for f in to_lift], gb_u)
-        D = coeff_vectors(gb_u, drl_staircase, lift_nfs,
-                          is_reduced = true)
-
+        println("computing lift normal forms...")
+        # lift_nfs = Oscar.reduce([f.curr for f in to_lift], gb_u)
+        lift_nfs = normalform(gb_u, [f.curr for f in to_lift], ordering = DegRevLex())
         if test_lift
-            to_del = Int[]
+            empty!(to_del)
             println("testing for stability (normal form)")
-            for (j, dd) in enumerate(D)
+            for (j, nf_f) in enumerate(lift_nfs)
                 f = to_lift[j]
-                if iszero(dd)
+                if iszero(nf_f)
                     push!(result, Rloc(f.curr))
                     push!(to_del, j)
                 end
             end
             println("$(length(to_del))/$(length(to_lift)) stable elements (normal form)")
             deleteat!(to_lift, to_del)
-            deleteat!(D, to_del)
             deleteat!(lift_nfs, to_del)
             isempty(to_lift) && break
         end
 
-        trivial_lifting = all(slice .== slice_nfs)
+        slice = vcat([u .* target_staircase for u in U]...)
+        println("computing slice normal forms...")
+        # slice_nfs = Oscar.reduce(slice, gb_u)
+        slice_nfs = normalform(gb_u, slice, ordering = DegRevLex())
+        empty!(to_del)
+        for (i, sl_nf) in enumerate(slice_nfs)
+            if sl_nf == slice[i]
+                push!(to_del, i)
+                drl_staircase_flagmap[slice[i]] = true
+            end
+        end
+        if length(to_del) != length(slice)
+            println("non-trivial lift, dividing staircase...")
+            triv_slice_part = slice[to_del]
+            deleteat!(slice_nfs, to_del)
+            deleteat!(slice, to_del)
+            staircase_rem = [k for k in keys(drl_staircase_flagmap) if !drl_staircase_flagmap[k]]
+            for k in keys(drl_staircase_flagmap)
+                drl_staircase_flagmap[k] = false
+            end
 
-        if !trivial_lifting
+            println("computing remaining slice coeff vectors ($(length(slice) - length(to_del))/$(length(slice)))...")
+            C1 = coeff_vectors(gb_u, triv_slice_part, slice_nfs, is_reduced = true)
+            C2 = coeff_vectors(gb_u, staircase_rem, slice_nfs, is_reduced = true)
+            println("computing lift coeff vectors...")
+            D1 = coeff_vectors(gb_u, triv_slice_part, lift_nfs, is_reduced = true)
+            D2 = coeff_vectors(gb_u, staircase_rem, lift_nfs, is_reduced = true)
+            
             FF = base_ring(R)
-            CC = matrix(FF, C)
-            DD = matrix(FF, D)
+            CC2 = matrix(FF, C2)
+            DD2 = matrix(FF, D2)
             sz = 0
             nzsz = 0
-            for x in CC
+            for x in CC2
                 sz += 1
                 if !iszero(x)
                     nzsz += 1
                 end
             end
             dens = nzsz/sz
-            sze = size(transpose(matrix(R,C)))
+            sze = size(transpose(CC2))
             @printf "lifting %i elements, mat of size %i x %i, density %2.2f%%\n" length(to_lift) sze[1] sze[2] dens
-            hassol, vs = can_solve_with_solution(transpose(CC),transpose(DD))
+            hassol, vs2 = can_solve_with_solution(transpose(CC2),transpose(DD2))
             !hassol && error("unliftable elements")
+            if isempty(triv_slice_part)
+                lifts = [sum(vs2[:, j] .* slice) for j in 1:length(to_lift)]
+            else
+                vs1 = transpose(matrix(D1)) - transpose(matrix(C1)) * vs2
+                lifts = [sum(vs1[:, j] .* triv_slice_part) + sum(vs2[:, j] .* slice)
+                         for j in 1:length(to_lift)]
+            end
         else
             println("trivial lifting step")
-            vs = transpose(matrix(R, coeff_vectors(gb_u, slice, lift_nfs)))
+            lifts = lift_nfs
         end
-
-        lifts = [vs[:, j] for j in 1:size(vs, 2)]
 
         if test_lift
             u = first(U)
@@ -299,11 +332,13 @@ function gen_fglm(I::Ideal{P};
                     n_tried += 1
                     pss = [coeff(f.curr, n_free_vars, m)
                            for m in f.support]
-                    next_cfs = [extract_coefficient(cf, p[1], p[2], u,
-                                                    free_vars)
-                                for (cf, p) in zip(pss, f.pades)]
-                    # TODO: this is a really dumb idea
-                    if all(cf -> -cf in next_cfs, lifts[j]) 
+                    next_guessed_cfs = [extract_coefficient(cf, p[1], p[2], u,
+                                                            free_vars)
+                                        for (cf, p) in zip(pss, f.pades)]
+                    next_cfs = [coeff(lifts[j], prod(n_free_vars .^ m)*u)
+                                for m in f.support]
+
+                    if next_guessed_cfs == -next_cfs
                         n_stable_elements += 1
                         p = f.pades
                         push!(result, sum([(Rloc(p[k][1])/Rloc(p[k][2]))*Rloc(prod(n_free_vars .^ m))
@@ -321,7 +356,7 @@ function gen_fglm(I::Ideal{P};
             isempty(to_lift) && break
         end
 
-        [f.curr = f.curr - sum(l .* slice) for (l, f) in zip(lifts, to_lift)]
+        [f.curr = f.curr - l for (l, f) in zip(lifts, to_lift)]
         
         if !test_lift
             println("starting pade approximations for $(length(to_lift)) elements")
@@ -448,14 +483,44 @@ function coeff_vectors(gb::Vector{P},
                        F::Vector{P};
                        is_reduced = false) where {P <: POL}
     
-    # TODO: normalform randomly does not work
+    # TODO: maybe normalform does not work
     # nfs = normalform(gb, F, ordering = ordering)
     nfs = if !is_reduced
-        Oscar.reduce(F, gb)
+        # Oscar.reduce(F, gb)
+        normalform(gb, F, ordering = DegRevLex())
     else
         F
     end
     return [[coeff(g,m) for m in vec_basis] for g in nfs]
+end
+
+# compute coeffs of F in terms of staircase
+function coeff_vectors(gb::Vector{P},
+                       vec_basis_hmap::Dict{P, Int},
+                       vec_basis_length::Int,
+                       F::Vector{P};
+                       is_reduced = false) where {P <: POL}
+    
+    field = base_ring(parent(first(F)))
+    res = [zeros(field, vec_basis_length) for _ in 1:length(F)]
+    # TODO: maybe normalform does not work
+    # nfs = normalform(gb, F, ordering = ordering)
+    nfs = if !is_reduced
+        # Oscar.reduce(F, gb)
+        normalform(gb, F, ordering = DegRevLex())
+    else
+        F
+    end
+    for i in 1:length(F)
+        f = F[i]
+        for t in terms(f)
+            cf = coeff(t, 1)
+            m = monomial(t, 1)
+            res[i][vec_basis_hmap[m]] = cf
+        end
+    end
+
+    return res
 end
 
 function next_drl(mon::POL,
