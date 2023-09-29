@@ -248,7 +248,8 @@ function gen_fglm(I::Ideal{P};
 
         println("computing lift normal forms...")
         # lift_nfs = Oscar.reduce([f.curr for f in to_lift], gb_u)
-        lift_nfs = normalform(gb_u, [f.curr for f in to_lift], ordering = DegRevLex())
+        lift_nfs = normalform(gb_u, [f.curr for f in to_lift],
+                              ordering = DegRevLex(), check = false)
         if test_lift
             empty!(to_del)
             println("testing for stability (normal form)")
@@ -268,7 +269,7 @@ function gen_fglm(I::Ideal{P};
         slice = vcat([u .* target_staircase for u in U]...)
         println("computing slice normal forms...")
         # slice_nfs = Oscar.reduce(slice, gb_u)
-        slice_nfs = normalform(gb_u, slice, ordering = DegRevLex())
+        slice_nfs = normalform(gb_u, slice, ordering = DegRevLex(), check = false)
         empty!(to_del)
         for (i, sl_nf) in enumerate(slice_nfs)
             if sl_nf == slice[i]
@@ -487,7 +488,7 @@ function coeff_vectors(gb::Vector{P},
     # nfs = normalform(gb, F, ordering = ordering)
     nfs = if !is_reduced
         # Oscar.reduce(F, gb)
-        normalform(gb, F, ordering = DegRevLex())
+        normalform(gb, F, ordering = DegRevLex(), check = false)
     else
         F
     end
@@ -507,7 +508,7 @@ function coeff_vectors(gb::Vector{P},
     # nfs = normalform(gb, F, ordering = ordering)
     nfs = if !is_reduced
         # Oscar.reduce(F, gb)
-        normalform(gb, F, ordering = DegRevLex())
+        normalform(gb, F, ordering = DegRevLex(), check = false)
     else
         F
     end
