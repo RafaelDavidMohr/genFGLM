@@ -142,7 +142,8 @@ function gen_fglm(I::Ideal{P};
     # pre-computations to determine good projection
     if isempty(ind_set)
         println("determining maximally independent set")
-        gb_1 = gens(groebner_basis_f4(I, complete_reduction = true))
+        # gb_1 = gens(groebner_basis_f4(I, complete_reduction = true))
+        gb_1 = groebner(gens(I), ordering = DegRevLex())
     end
     (sort_terms!).(gb_1)
 
@@ -169,7 +170,8 @@ function gen_fglm(I::Ideal{P};
         end
         I_new = ideal(R, [f(ev...) for f in gens(I)])
         println("Computing initial DRL GB...")
-        gb = gens(groebner_basis_f4(I_new, complete_reduction = true))
+        # gb = gens(groebner_basis_f4(I_new, complete_reduction = true))
+        gb = groebner(gens(I_new), ordering = DegRevLex())
     else
         I_new = I
         gb = gb_1
@@ -181,7 +183,8 @@ function gen_fglm(I::Ideal{P};
         gb_1 = groebner(vcat(gens(I_new), free_vars), ordering = target_order)
         target_staircase = staircase(gb_1, lex(R)) 
     elseif target_order == :degrevlex
-        gb_1 = gens(groebner_basis_f4(I_new + ideal(R, free_vars), complete_reduction = true, info_level = 0))
+        # gb_1 = gens(groebner_basis_f4(I_new + ideal(R, free_vars), complete_reduction = true, info_level = 0))
+        gb_1 = groebner(vcat(gens(I_new), free_vars), ordering = DegRevLex())
         target_staircase = staircase(gb_1, degrevlex(R))
     else
         error("target ordering not supported")
@@ -232,9 +235,10 @@ function gen_fglm(I::Ideal{P};
             pt_id = mons_of_deg_d(free_vars, d+1)
         end
         println("computing DRL GB...")
-        gb_u = gens(groebner_basis_f4(ideal(R, vcat(gb, pt_id)),
-                                      complete_reduction = true,
-                                      info_level = 0))
+        # gb_u = gens(groebner_basis_f4(ideal(R, vcat(gb, pt_id)),
+        #                               complete_reduction = true,
+        #                               info_level = 0))
+        gb_u = groebner(vcat(gb, pt_id), ordering = DegRevLex())
         println("computing staircase...")
         leadmons = (leading_monomial).(gb_u)
 
