@@ -624,7 +624,7 @@ end
 
 function rand_seq(nvars, deg, neqns; dense=true, nterms=10)
     R, vars = polynomial_ring(GF(65521), "x" => (1:nvars, ))
-    sys = [dense ? rand_poly_dense(R, deqns) : rand_poly_sparse(R, deg, nterms)
+    sys = [dense ? rand_poly_dense(R, deg) : rand_poly_sparse(R, deg, nterms)
            for _ in 1:neqns]
     return ideal(R, sys)
 end
