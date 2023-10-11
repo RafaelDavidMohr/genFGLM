@@ -4,7 +4,7 @@ using Reexport
 @reexport using Oscar
 using Groebner, AbstractTrees, Printf
 
-export critical_points, cyclic, gen_fglm, ed_variety, rand_poly_dense, rand_poly_sparse 
+export critical_points, cyclic, gen_fglm, ed_variety, rand_seq, rand_poly_dense, rand_poly_sparse 
 
 const POL = MPolyElem
 
@@ -135,7 +135,8 @@ end
 function gen_fglm(I::Ideal{P};
                   target_order = :lex,
                   ind_set = P[],
-                  switch_to_generic = true) where {P <: POL}
+                  switch_to_generic = true,
+                  double_deg_bound = 0) where {P <: POL}
 
     !isempty(ind_set) && !switch_to_generic && error("can't do that")
     
@@ -209,6 +210,7 @@ function gen_fglm(I::Ideal{P};
     println("------")
 
     d = 2
+    lowb = 2
     curr_deg = 1
     full = [one(R)]
 
@@ -228,7 +230,7 @@ function gen_fglm(I::Ideal{P};
             pt_id = point_ideal(1, mons, next_deg_mons)
         else
             println("lifting to degree $d")
-            lowb = d == 2 ? 2 : Int(d/2) + 2
+            # lowb = d == 2 ? 2 : Int(d/2) + 2
             U = vcat(mons[2:end],
                      [mons_of_deg_d(free_vars, e) for e in lowb:d]...)
             append!(full, U)
@@ -364,6 +366,7 @@ function gen_fglm(I::Ideal{P};
         [f.curr = f.curr - l for (l, f) in zip(lifts, to_lift)]
         
         if !test_lift
+            n_succ = 0
             println("starting pade approximations for $(length(to_lift)) elements")
             i = findlast(m -> total_degree(m) <= d/2, full)
             half = full[1:i]
@@ -372,12 +375,20 @@ function gen_fglm(I::Ideal{P};
                               full, half, pt_id)
                          for m in f.support]
                 any(p -> all(iszero, p), pades) && continue
+                n_succ += 1
                 f.pades = pades
             end
+            println("$(n_succ) elements with succesful pade approximation")
             mons = pt_id
             next_deg_mons = mons_of_deg_d(free_vars, d+2)
-            d *= 2
-            println("doubling degree to $(d)")
+            lowb = d + 2
+            if iszero(double_deg_bound) || d < double_deg_bound
+                d *= 2
+                println("doubling degree to $(d)")
+            else
+                d += 2
+                println("increasing degree to $(d)")
+            end
         end
         test_lift = !test_lift
         println("------")
@@ -467,19 +478,11 @@ function staircase(gb::Vector{P},
                    res=[one(parent(first(gb)))]) where {P <: POL}
     
     R = parent(first(gb))
-    LI = ideal(R, [leading_monomial(g, ordering = ord) for g in gb])
-
-    i = 1 
-    while i <= length(res)
-        nexts = vrs .* res[i]
-        for n in nexts
-            n in res && continue
-            n in LI && continue
-            push!(res, n)
-        end
-        i += 1
-    end
-    return sort(res, lt = (m1, m2) -> cmp(ord, m1, m2) in [-1,0] ? true : false)
+    stairc = [one(R)]
+    montree = MonomialNode(true, 1, MonomialNode[])
+    lms = [leading_monomial(p, ordering=ord) for p in gb]
+    staircase!(lms, stairc, montree, one(R))
+    return stairc
 end
 
 # compute coeffs of F in terms of staircase
@@ -550,6 +553,14 @@ function next_drl(mon::POL,
     return prod(gens(R)[vars_pos] .^ res)
 end  
 
+function nz_exps(mon::POL)
+    R = parent(mon)
+    vrs = gens(R)
+    vrs_enum = (identity).(enumerate(vrs))
+    nz_exps_inds = findall(((i, v), ) -> !iszero(exponent(mon, 1, i)), vrs_enum)
+    return vrs[nz_exps_inds]
+end
+
 # for benchmarking
 
 function rand_poly_sparse(R::MPolyRing,
@@ -609,6 +620,13 @@ function ed_variety(F)
     k = jacobi_matrix(sum((u - x) .^ 2))[1:nv, :]
     l = hcat(j, k)
     return ideal(R, [FF..., minors(l, c + 1)...])
+end
+
+function rand_seq(nvars, deg, neqns; dense=true, nterms=10)
+    R, vars = polynomial_ring(GF(65521), "x" => (1:nvars, ))
+    sys = [dense ? rand_poly_dense(R, deqns) : rand_poly_sparse(R, deg, nterms)
+           for _ in 1:neqns]
+    return ideal(R, sys)
 end
 
 end # module genFGLM
