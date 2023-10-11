@@ -1,3 +1,4 @@
+exit() # doesnt work at the moment
 using genFGLM
 P, vars = polynomial_ring(GF(65521), "x" => 1:8)
 F = cyclic(vars)
