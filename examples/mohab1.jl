@@ -1,3 +1,4 @@
+exit() # doesnt work at the moment
 using genFGLM
 P, (u,v,w,x) = PolynomialRing(GF(1119649), ["u", "v", "w", "x"]);
 
