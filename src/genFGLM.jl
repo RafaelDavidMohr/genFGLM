@@ -131,6 +131,77 @@ function extract_coefficient(pow_series::P,
     return -(res * inv(coeff(denom, one(parent(mon)))))
 end
 
+# assume that pow_series is given up to mon
+function pow_series_coeff(pow_series::P,
+                          p::P,
+                          q::P,
+                          mon::P) where {P <: POL}
+
+    R = parent(mon)
+    F = base_ring(mon)
+    rhs = zero(F)
+
+    for (c, v) in zip(coefficients(q), monomials(q))
+        does_div, w = divides(mon, v)
+        !does_div && continue
+        rhs += c*coeff(pow_series, w)
+    end
+
+    return inv(coeff(q, one(R)))*(coeff(p, mon) - rhs)
+end
+
+function pow_series(p::P, q::P, ord::P, vrs_pos::Vector{Int}) where {P <: POL}
+    R = parent(p)
+    res = coeff(q, one(R))*one(R)
+    curr_mon = next_drl(one(R), vrs_pos)
+
+    while cmp(degrevlex(R), ord, curr_mon) >= 0
+        next_cf = pow_series_coeff(res, p, q, curr_mon)
+        res += next_cf*curr_mon
+        curr_mon = next_drl(curr_mon, vrs_pos)
+    end
+    return res
+end
+
+function repr_in_vars(p::P, free_vars::Vector{P}) where {P <: POL}
+    R = parent(p)
+    free_vars_pos = [findfirst(v -> v == w, gens(R)) for w in free_vars]
+    exps = collect(exponents(p))
+    res = Tuple{P, P}[]
+    
+    for e in exps
+        deleteat!(e, free_vars_pos)
+    end
+    unique!(exps)
+    sort!(exps, by = e -> prod(free_vars .^ e), lt = (u1, u2) -> cmp(degrevlex(R), u1, u2) > 0)
+
+    n_free_vars = setdiff(gens(R), free_vars)
+    for e in exps
+        cf = coeff(p, n_free_vars, e)
+        push!(res, (cf, prod(n_free_vars .^ e)))
+    end
+    return res
+end
+
+function normalize_free_vars(p::P,
+                             free_vars::Vector{P},
+                             order::P) where {P <: POL}
+
+    repr_p = repr_in_vars(p, free_vars)
+    R = parent(p)
+    free_vars_pos = [findfirst(v -> v == w, gens(R)) for w in free_vars]
+
+    q = first(repr_p)[1]
+    res = first(repr_p)[2]
+    for (cf, m) in repr_p[2:end]
+        cf_pow = pow_series(cf, q, order, free_vars_pos)
+        res += (cf_pow*m)
+    end
+
+    return res
+end
+        
+
 # main function
 function gen_fglm(I::Ideal{P};
                   target_order = :lex,
@@ -413,10 +484,10 @@ AbstractTrees.NodeType(::Type{<:MonomialNode}) = AbstractTrees.HasNodeType()
 function staircase!(leadmons::Vector{P},
                     stairc::Vector{P},
                     tree::MonomialNode,
-                    currmon::P) where {P <: POL}
+                    currmon::P,
+                    vrs=gens(parent(first(leadmons)))) where {P <: POL}
 
-    R = parent(currmon)
-    nvr = ngens(R)
+    nvr = length(vrs)
     if !tree.inStair
         any(m -> divides(currmon, m)[1], leadmons) && return
         tree.inStair = true
@@ -428,8 +499,11 @@ function staircase!(leadmons::Vector{P},
                          for i in 0:(nvr-vs)]
     end
     for ch in children(tree)
-        mon = currmon * gens(R)[ch.varstart]
-        staircase!(leadmons, stairc, ch, mon)
+        mon = currmon * vrs[ch.varstart]
+        if total_degree(mon) > 100
+            return
+        end
+        staircase!(leadmons, stairc, ch, mon, vrs)
     end
     return
 end
@@ -481,7 +555,7 @@ function staircase(gb::Vector{P},
     stairc = [one(R)]
     montree = MonomialNode(true, 1, MonomialNode[])
     lms = [leading_monomial(p, ordering=ord) for p in gb]
-    staircase!(lms, stairc, montree, one(R))
+    staircase!(lms, stairc, montree, one(R), vrs)
     return stairc
 end
 
@@ -532,25 +606,35 @@ function coeff_vectors(gb::Vector{P},
 end
 
 function next_drl(mon::POL,
-                  vars_pos::Vector{Int})
+                  vars_pos::Vector{Int}=collect(1:length(gens(parent(mon)))))
 
-    exps = first(exponents(mon))[vars_pos]
-    low = findfirst(!iszero, exps)
-    high = findlast(!iszero, exps)
-    if low == high
-        res = zeros(Int, length(exps))
-        res[end] = first(exps) + 1
-    elseif isone(low)
-        res = zeros(Int, length(exps))
-        res[high] = exps[high] - 1
-        res[high-1] = sum(exps) - res[high]
-    else
-        res = copy(exps)
-        res[low] -= 1
-        res[low-1] += 1
-    end
     R = parent(mon)
-    return prod(gens(R)[vars_pos] .^ res)
+    vrs = gens(R)
+    exps = first(exponents(mon))[vars_pos]
+    first_nz = findfirst(!iszero, exps)
+
+    if isnothing(first_nz)
+        return vrs[last(vars_pos)]
+    end
+
+    d = total_degree(mon)
+    if isone(first_nz) && exps[first_nz] == d
+        return vrs[last(vars_pos)]^(d+1)
+    end
+
+    res_exps = copy(exps)
+    if !isone(first_nz)
+        res_exps[first_nz] -= 1
+        res_exps[first_nz-1] += 1
+        return prod(gens(R)[vars_pos] .^ res_exps)
+    end
+
+    second_nz = findfirst(!iszero, exps[2:end]) + 1
+    res_exps[second_nz] -= 1
+    res_exps[first_nz] = 0
+    res_exps[second_nz-1] += exps[first_nz] + 1
+
+    return prod(gens(R)[vars_pos] .^ res_exps)
 end  
 
 function nz_exps(mon::POL)
