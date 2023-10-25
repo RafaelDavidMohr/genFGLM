@@ -250,17 +250,13 @@ function gen_fglm(I::Ideal{P};
     end
     # ----
     
+    ln_free_vars = length(n_free_vars)
+    target_order_gr = ProductOrdering(DegRevLex(n_free_vars[1:ln_free_vars-1]),
+                                      DegRevLex([n_free_vars[ln_free_vars], free_vars...]))
+    target_order_osc = degrevlex(n_free_vars[1:ln_free_vars-1])*degrevlex([n_free_vars[ln_free_vars], free_vars...])
     println("Computing initial target staircase...")
-    if target_order == :lex
-        gb_1 = groebner(vcat(gens(I_new), free_vars), ordering = target_order)
-        target_staircase = staircase(gb_1, lex(R)) 
-    elseif target_order == :degrevlex
-        # gb_1 = gens(groebner_basis_f4(I_new + ideal(R, free_vars), complete_reduction = true, info_level = 0))
-        gb_1 = groebner(vcat(gens(I_new), free_vars), ordering = DegRevLex())
-        target_staircase = staircase(gb_1, degrevlex(R))
-    else
-        error("target ordering not supported")
-    end
+    gb_1 = groebner(vcat(gens(I_new), free_vars), ordering = target_order_gr)
+    target_staircase = staircase(gb_1, target_order_osc) 
 
     to_lift = Vector{candPol{typeof(first(gb_1))}}(undef,
                                                    length(gb_1) - length(free_vars))
@@ -292,6 +288,8 @@ function gen_fglm(I::Ideal{P};
     to_del = Int[]
 
     test_lift = true
+    compute_ordering_gr = ProductOrdering(DegRevLex(n_free_vars), DegRevLex(free_vars))
+    compute_ordering_osc = degrevlex(n_free_vars)*degrevlex(free_vars)
     
     while !isempty(to_lift)
         if test_lift
@@ -307,13 +305,13 @@ function gen_fglm(I::Ideal{P};
             append!(full, U)
             pt_id = mons_of_deg_d(free_vars, d+1)
         end
-        println("computing DRL GB...")
+        println("computing GB...")
         # gb_u = gens(groebner_basis_f4(ideal(R, vcat(gb, pt_id)),
         #                               complete_reduction = true,
         #                               info_level = 0))
-        gb_u = groebner(vcat(gb, pt_id), ordering = DegRevLex())
+        gb_u = groebner(vcat(gb, pt_id), ordering = compute_ordering_gr)
         println("computing staircase...")
-        leadmons = (leading_monomial).(gb_u)
+        leadmons = (p -> leading_monomial(p, ordering=compute_ordering_osc)).(gb_u)
 
         prev_length = length(drl_staircase)
         staircase!(leadmons, drl_staircase, montree, one(R))
@@ -325,8 +323,9 @@ function gen_fglm(I::Ideal{P};
 
         println("computing lift normal forms...")
         # lift_nfs = Oscar.reduce([f.curr for f in to_lift], gb_u)
-        lift_nfs = normalform(gb_u, [f.curr for f in to_lift],
-                              ordering = DegRevLex(), check = false)
+        # lift_nfs = normalform(gb_u, [f.curr for f in to_lift],
+        #                       ordering = compute_ordering_gr, check = false)
+        lift_nfs = Oscar.reduce([f.curr for f in to_lift], gb_u, ordering = compute_ordering_osc)
         if test_lift
             empty!(to_del)
             println("testing for stability (normal form)")
@@ -345,8 +344,8 @@ function gen_fglm(I::Ideal{P};
 
         slice = vcat([u .* target_staircase for u in U]...)
         println("computing slice normal forms...")
-        # slice_nfs = Oscar.reduce(slice, gb_u)
-        slice_nfs = normalform(gb_u, slice, ordering = DegRevLex(), check = false)
+        slice_nfs = Oscar.reduce(slice, gb_u, ordering = compute_ordering_osc)
+        # slice_nfs = normalform(gb_u, slice, ordering = compute_ordering_gr, check = false)
         empty!(to_del)
         for (i, sl_nf) in enumerate(slice_nfs)
             if sl_nf == slice[i]
