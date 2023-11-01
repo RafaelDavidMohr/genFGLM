@@ -258,13 +258,17 @@ function gen_fglm(I::Ideal{P};
     gb_1 = groebner(vcat(gens(I_new), free_vars), ordering = target_order_gr)
     target_staircase = staircase(gb_1, target_order_osc) 
 
-    to_lift = Vector{candPol{typeof(first(gb_1))}}(undef,
-                                                   length(gb_1) - length(free_vars))
+    to_lift = candPol{typeof(first(gb_1))}[]
     free_var_positions = [findfirst(v -> v == w, gens(R)) for w in free_vars]
     for (i, g) in enumerate(filter(g -> !(g in free_vars), gb_1))
+        lm = leading_monomial(g, ordering=target_order_osc)
+        divvars = filter(v -> divides(lm, v)[1], n_free_vars)
+        if !(divvars == [n_free_vars[ln_free_vars]])
+            continue
+        end
         support = [deleteat!(e, free_var_positions) for e in exponents(g)]
         pades = [(zero(R), one(R)) for _ in 1:length(support)]
-        to_lift[i] = candPol(g, support, pades)
+        push!(to_lift, candPol(g, support, pades))
     end
         
     mons = free_vars
