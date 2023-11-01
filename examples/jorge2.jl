@@ -5,7 +5,7 @@ F = [73960*x^3+46428*x^2*y-320426*x^2*z-88867*x*y^2-163934*x*y*z-184389*x*z^2-62
 
 id = ideal(P,F);
 vrs = gens(base_ring(id))
-comp_id = ideal(base_ring(id), [vrs[1]*vrs[2], vrs[1]*vrs[3]])
+comp_id = ideal(base_ring(id), [vrs[1]*vrs[2], vrs[1]*vrs[3], vrs[2]*vrs[3]])
 gen_fglm(comp_id, target_order = :degrevlex)
 tim = @elapsed gen_fglm(id, target_order = :degrevlex)
 println("time $(tim)")

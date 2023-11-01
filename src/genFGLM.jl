@@ -253,8 +253,8 @@ function gen_fglm(I::Ideal{P};
     ln_free_vars = length(n_free_vars)
     target_order_gr = ProductOrdering(DegRevLex(n_free_vars[1:ln_free_vars-1]),
                                       DegRevLex([n_free_vars[ln_free_vars], free_vars...]))
+    println(target_order_gr)
     target_order_osc = degrevlex(n_free_vars[1:ln_free_vars-1])*degrevlex([n_free_vars[ln_free_vars], free_vars...])
-    println("Computing initial target staircase...")
     gb_1 = groebner(vcat(gens(I_new), free_vars), ordering = target_order_gr)
     target_staircase = staircase(gb_1, target_order_osc) 
 
