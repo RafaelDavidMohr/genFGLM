@@ -1,8 +1,7 @@
 using genFGLM
 
-exit()
-P, (x,y,z) = PolynomialRing(GF(1618453), ["x", "y", "z"])
-f = rand_poly_dense(P, 5)
+P, (x,y,z,w) = PolynomialRing(GF(1618453), ["x", "y", "z","w"])
+f = rand_poly_dense(P, 3)
 id = ed_variety([f])
 vrs = gens(base_ring(id))
 comp_id = ideal(base_ring(id), [vrs[1]*vrs[2], vrs[1]*vrs[3], vrs[2]*vrs[3]])

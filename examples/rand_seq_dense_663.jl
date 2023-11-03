@@ -1,5 +1,6 @@
 using genFGLM
 
+exit()
 id = rand_seq(6,6,3)
 vrs = gens(base_ring(id))
 comp_id = ideal(base_ring(id), [vrs[1]*vrs[2], vrs[1]*vrs[3], vrs[2]*vrs[3]])

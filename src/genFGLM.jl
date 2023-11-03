@@ -205,6 +205,7 @@ end
 # main function
 function gen_fglm(I::Ideal{P};
                   target_order = :lex,
+                  compute_order = :elim,
                   ind_set = P[],
                   switch_to_generic = true,
                   double_deg_bound = 0) where {P <: POL}
@@ -265,6 +266,7 @@ function gen_fglm(I::Ideal{P};
         if !(divvars == [n_free_vars[ln_free_vars]])
             continue
         end
+        println("hypersurface to lift: degree $(total_degree(g))")
         support = [deleteat!(e, free_var_positions) for e in exponents(g)]
         pades = [(zero(R), one(R)) for _ in 1:length(support)]
         push!(to_lift, candPol(g, support, pades))
@@ -291,8 +293,13 @@ function gen_fglm(I::Ideal{P};
     to_del = Int[]
 
     test_lift = true
-    compute_ordering_gr = ProductOrdering(DegRevLex(n_free_vars), DegRevLex(free_vars))
-    compute_ordering_osc = degrevlex(n_free_vars)*degrevlex(free_vars)
+    if compute_order == :elim
+        compute_ordering_gr = ProductOrdering(DegRevLex(n_free_vars), DegRevLex(free_vars))
+        compute_ordering_osc = degrevlex(n_free_vars)*degrevlex(free_vars)
+    else
+        compute_ordering_gr = DegRevLex(gens(R))
+        compute_ordering_osc = degrevlex(gens(R))
+    end
     
     while !isempty(to_lift)
         if test_lift

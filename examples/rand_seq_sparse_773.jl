@@ -1,3 +1,4 @@
+exit()
 using genFGLM
 
 P, x = polynomial_ring(GF(65521), "x" => 1:7)
