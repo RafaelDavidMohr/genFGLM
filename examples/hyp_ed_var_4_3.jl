@@ -1,3 +1,4 @@
+exit()
 using genFGLM
 
 P, (x,y,z,w) = PolynomialRing(GF(1618453), ["x", "y", "z","w"])

@@ -1,3 +1,4 @@
+exit()
 using genFGLM
 
 id = rand_seq(6,4,3)

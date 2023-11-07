@@ -1,6 +1,5 @@
-using genFGLM
-
 exit() # system too big
+using genFGLM
 
 P, x = PolynomialRing(GF(1618453), "x" => (1:4, 1:4))
 sys = minors(matrix(x), 2)
