@@ -17,10 +17,10 @@ R = base_ring(id)
 k = 1
 while k <= length(gens(R))
     if mis == gens(R)[k:end]
-        isok = true
+        global isok = true
         break
     end
-    k += 1
+    global k += 1
 end
 println("MIS is last variables: $(isok)")
 tim2 = @elapsed groebner_basis_f4(id, eliminate = k - 2, info_level = 2)
