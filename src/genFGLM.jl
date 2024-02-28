@@ -97,8 +97,8 @@ function pade(r::P,
     K = can_solve_with_kernel(m, zero_matrix(F, l, 1))[3]
     # TODO: can there be no solution
     isempty(K) && return (zero(r), zero(r))
-    q = sum(K[1:k, 1] .* up_to_half_degd_mons)
-    p = sum(K[k+1:2*k, 1] .* up_to_half_degd_mons)
+    q = sum([prod(a) for a in zip(K[1:k, 1], up_to_half_degd_mons)])
+    p = sum([prod(a) for a in zip(K[k+1:2*k, 1], up_to_half_degd_mons)])
     g = gcd(p, q)
     return (divides(p,g)[2], divides(q,g)[2])
 end
@@ -252,25 +252,31 @@ function gen_fglm(I::Ideal{P};
     # ----
     
     ln_free_vars = length(n_free_vars)
-    target_order_gr = ProductOrdering(DegRevLex(n_free_vars[1:ln_free_vars-1]),
-                                      DegRevLex([n_free_vars[ln_free_vars], free_vars...]))
-    target_order_osc = degrevlex(n_free_vars[1:ln_free_vars-1])*degrevlex([n_free_vars[ln_free_vars], free_vars...])
+    if target_order == :lex
+        target_order_gr = Lex(gens(R))
+        target_order_osc = lex(gens(R))
+    else
+        error("unsupported target order")
+    end
+    # target_order_gr = ProductOrdering(DegRevLex(n_free_vars[1:ln_free_vars-1]),
+    #                                   DegRevLex([n_free_vars[ln_free_vars], free_vars...]))
+    # target_order_osc = degrevlex(n_free_vars[1:ln_free_vars-1])*degrevlex([n_free_vars[ln_free_vars], free_vars...])
     gb_1 = groebner(vcat(gens(I_new), free_vars), ordering = target_order_gr)
     target_staircase = staircase(gb_1, target_order_osc) 
 
     to_lift = candPol{typeof(first(gb_1))}[]
-    free_var_positions = [findfirst(v -> v == w, gens(R)) for w in free_vars]
-    for (i, g) in enumerate(filter(g -> !(g in free_vars), gb_1))
-        lm = leading_monomial(g, ordering=target_order_osc)
-        divvars = filter(v -> divides(lm, v)[1], n_free_vars)
-        if !(divvars == [n_free_vars[ln_free_vars]])
-            continue
-        end
-        println("hypersurface to lift: degree $(total_degree(g))")
-        support = [deleteat!(e, free_var_positions) for e in exponents(g)]
-        pades = [(zero(R), one(R)) for _ in 1:length(support)]
-        push!(to_lift, candPol(g, support, pades))
-    end
+    # free_var_positions = [findfirst(v -> v == w, gens(R)) for w in free_vars]
+    # for (i, g) in enumerate(filter(g -> !(g in free_vars), gb_1))
+    #     lm = leading_monomial(g, ordering=target_order_osc)
+    #     divvars = filter(v -> divides(lm, v)[1], n_free_vars)
+    #     if !(divvars == [n_free_vars[ln_free_vars]])
+    #         continue
+    #     end
+    #     println("hypersurface to lift: degree $(total_degree(g))")
+    #     support = [deleteat!(e, free_var_positions) for e in exponents(g)]
+    #     pades = [(zero(R), one(R)) for _ in 1:length(support)]
+    #     push!(to_lift, candPol(g, support, pades))
+    # end
         
     mons = free_vars
     next_deg_mons = mons_of_deg_d(free_vars, 2)
