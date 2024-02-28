@@ -265,18 +265,13 @@ function gen_fglm(I::Ideal{P};
     target_staircase = staircase(gb_1, target_order_osc) 
 
     to_lift = candPol{typeof(first(gb_1))}[]
-    # free_var_positions = [findfirst(v -> v == w, gens(R)) for w in free_vars]
-    # for (i, g) in enumerate(filter(g -> !(g in free_vars), gb_1))
-    #     lm = leading_monomial(g, ordering=target_order_osc)
-    #     divvars = filter(v -> divides(lm, v)[1], n_free_vars)
-    #     if !(divvars == [n_free_vars[ln_free_vars]])
-    #         continue
-    #     end
-    #     println("hypersurface to lift: degree $(total_degree(g))")
-    #     support = [deleteat!(e, free_var_positions) for e in exponents(g)]
-    #     pades = [(zero(R), one(R)) for _ in 1:length(support)]
-    #     push!(to_lift, candPol(g, support, pades))
-    # end
+    free_var_positions = [findfirst(v -> v == w, gens(R)) for w in free_vars]
+    for (i, g) in enumerate(filter(g -> !(g in free_vars), gb_1))
+        support = [deleteat!(e, free_var_positions) for e in exponents(g)]
+        unique!(support)
+        pades = [(zero(R), one(R)) for _ in 1:length(support)]
+        push!(to_lift, candPol(g, copy(support), copy(pades)))
+    end
         
     mons = free_vars
     next_deg_mons = mons_of_deg_d(free_vars, 2)
