@@ -398,11 +398,15 @@ function gen_fglm(I::Ideal{P};
             hassol, vs2 = can_solve_with_solution(transpose(CC2),transpose(DD2))
             !hassol && error("unliftable elements")
             if isempty(triv_slice_part)
-                lifts = [sum(vs2[:, j] .* slice) for j in 1:length(to_lift)]
+                # lifts = [sum(vs2[:, j] .* slice) for j in 1:length(to_lift)]
+                lifts = [sum([prod(a) for a in zip(vs2[:, j], slice)])
+                         for j in 1:length(to_lift)]
             else
                 vs1 = transpose(matrix(D1)) - transpose(matrix(C1)) * vs2
-                lifts = [sum(vs1[:, j] .* triv_slice_part) + sum(vs2[:, j] .* slice)
+                lifts = [sum([prod(a) for a in zip(vs1[:, j], triv_slice_part)]) + sum([prod(a) for a in zip(vs2[:, j], slice)])
                          for j in 1:length(to_lift)]
+                # lifts = [sum(vs1[:, j] .* triv_slice_part) + sum(vs2[:, j] .* slice)
+                #          for j in 1:length(to_lift)]
             end
         else
             println("trivial lifting step")
