@@ -6,7 +6,7 @@ using Groebner, AbstractTrees, Printf
 
 export critical_points, cyclic, gen_fglm, ed_variety, rand_seq, rand_poly_dense, rand_poly_sparse 
 
-const POL = MPolyElem
+const POL = MPolyRingElem
 
 # type used for a canditate lifted element
 
@@ -28,7 +28,7 @@ end
 
 # type for ring with inverted variables
 
-struct subVarLoc{C, P <: MPolyElem{C}, LOC <: MPolyLocRingElem, MMAP}
+struct subVarLoc{C, P <: MPolyRingElem{C}, LOC, MMAP}
     R::MPolyRing{C}
     
     vars::Vector{P}
@@ -40,7 +40,7 @@ struct subVarLoc{C, P <: MPolyElem{C}, LOC <: MPolyLocRingElem, MMAP}
 end
 
 function subVarLoc(R::MPolyRing{T},
-                   vars::Vector{MP}) where {T, MP <: MPolyElem{T}}
+                   vars::Vector{MP}) where {T, MP <: MPolyRingElem{T}}
 
     rem_vars = setdiff(gens(R), vars)
     S, _ = polynomial_ring(base_ring(R), ["z$i" for i in 1:length(vars)])
@@ -94,8 +94,7 @@ function pade(r::P,
     zero_block = zero_matrix(F, l - k, k)
     right_block = vcat(id_block, zero_block)
     m = hcat(transpose(matrix(F, vs)), right_block)
-    K = can_solve_with_kernel(m, zero_matrix(F, l, 1))[3]
-    # TODO: can there be no solution
+    K = kernel(m, side = :right)
     isempty(K) && return (zero(r), zero(r))
     q = sum([prod(a) for a in zip(K[1:k, 1], up_to_half_degd_mons)])
     p = sum([prod(a) for a in zip(K[k+1:2*k, 1], up_to_half_degd_mons)])
@@ -208,15 +207,17 @@ function gen_fglm(I::Ideal{P};
                   compute_order = :elim,
                   ind_set = P[],
                   switch_to_generic = true,
+                  compute_full_input_gb = false,
                   double_deg_bound = 0) where {P <: POL}
 
     !isempty(ind_set) && !switch_to_generic && error("can't do that")
+    target_order != :lex && error("unsupported target order")
     
     # pre-computations to determine good projection
     if isempty(ind_set)
         println("determining maximally independent set")
-        # gb_1 = gens(groebner_basis_f4(I, complete_reduction = true))
-        gb_1 = groebner(gens(I), ordering = DegRevLex())
+        tim = @elapsed gb_1 = groebner(gens(I), ordering = DegRevLex())
+        println("time: $(tim)")
     end
     (sort_terms!).(gb_1)
 
@@ -229,7 +230,7 @@ function gen_fglm(I::Ideal{P};
     println("maximally independent set $(free_vars)")
 
     if switch_to_generic
-        println("choosing random point in base space")
+        println("choosing random point in parameter space")
         R = base_ring(I)
         ev = Vector{typeof(first(gb_1))}(undef, nvars(R))
         j = 1
@@ -242,28 +243,40 @@ function gen_fglm(I::Ideal{P};
             end
         end
         I_new = ideal(R, [f(ev...) for f in gens(I)])
-        println("Computing initial DRL GB...")
-        # gb = gens(groebner_basis_f4(I_new, complete_reduction = true))
-        gb = groebner(gens(I_new), ordering = DegRevLex())
     else
         I_new = I
-        gb = gb_1
     end
     # ----
-    
+
+    # set up monomial orders
     ln_free_vars = length(n_free_vars)
+    if compute_order == :elim
+        compute_ordering_gr = ProductOrdering(DegRevLex(n_free_vars), DegRevLex(free_vars))
+        compute_ordering_osc = degrevlex(n_free_vars)*degrevlex(free_vars)
+    else
+        println("choosing DRL as input order")
+        compute_ordering_gr = DegRevLex(gens(R))
+        compute_ordering_osc = degrevlex(gens(R))
+    end
     if target_order == :lex
         target_order_gr = Lex(gens(R))
         target_order_osc = lex(gens(R))
-    else
-        error("unsupported target order")
     end
-    # target_order_gr = ProductOrdering(DegRevLex(n_free_vars[1:ln_free_vars-1]),
-    #                                   DegRevLex([n_free_vars[ln_free_vars], free_vars...]))
-    # target_order_osc = degrevlex(n_free_vars[1:ln_free_vars-1])*degrevlex([n_free_vars[ln_free_vars], free_vars...])
+    # ----
+
+    # generators for input ideal, depending on input order
+    if compute_full_input_gb && (compute_order == :elim || switch_to_generic)
+        println("Computing full input GB")
+        tim = @elapsed ideal_gens = groebner(gens(I_new), ordering = compute_ordering_gr,
+                                             homogenize = :no)
+        println("time: $(tim)")
+    else
+        ideal_gens = gens(I_new)
+    end
+    
+    # compute target GB at precision 0, set up lifting data
     gb_1 = groebner(vcat(gens(I_new), free_vars), ordering = target_order_gr)
     target_staircase = staircase(gb_1, target_order_osc) 
-
     to_lift = candPol{typeof(first(gb_1))}[]
     free_var_positions = [findfirst(v -> v == w, gens(R)) for w in free_vars]
     for (i, g) in enumerate(filter(g -> !(g in free_vars), gb_1))
@@ -272,36 +285,30 @@ function gen_fglm(I::Ideal{P};
         pades = [(zero(R), one(R)) for _ in 1:length(support)]
         push!(to_lift, candPol(g, copy(support), copy(pades)))
     end
-        
+    # ----
+
+    # input staircase
+    input_staircase = [one(R)]
+    # used to flag all elements in slice which are also in staircase
+    input_staircase_flagmap = Dict{P, Bool}([(one(R), false)])
+    montree = MonomialNode(true, 1, MonomialNode[])
+    to_del = Int[]
+    # ----
+
+    # various auxiliary variables
     mons = free_vars
     next_deg_mons = mons_of_deg_d(free_vars, 2)
-
     Rloc = subVarLoc(R, free_vars)
     result = typeof(first(gens(Rloc.loc_ring)))[]
-
-    println("starting lift...")
-    println("------")
-
     d = 2
     lowb = 2
     curr_deg = 1
-    full = [one(R)]
-
-    drl_staircase = [one(R)]
-    # used to flag all elements in slice which are also in staircase
-    drl_staircase_flagmap = Dict{P, Bool}([(one(R), false)])
-    montree = MonomialNode(true, 1, MonomialNode[])
-    to_del = Int[]
-
     test_lift = true
-    if compute_order == :elim
-        compute_ordering_gr = ProductOrdering(DegRevLex(n_free_vars), DegRevLex(free_vars))
-        compute_ordering_osc = degrevlex(n_free_vars)*degrevlex(free_vars)
-    else
-        compute_ordering_gr = DegRevLex(gens(R))
-        compute_ordering_osc = degrevlex(gens(R))
-    end
-    
+    full = [one(R)]
+    # ----
+
+    println("starting lift...")
+    println("------")
     while !isempty(to_lift)
         if test_lift
             println("doing a test lift")
@@ -310,33 +317,30 @@ function gen_fglm(I::Ideal{P};
             pt_id = point_ideal(1, mons, next_deg_mons)
         else
             println("lifting to degree $d")
-            # lowb = d == 2 ? 2 : Int(d/2) + 2
             U = vcat(mons[2:end],
                      [mons_of_deg_d(free_vars, e) for e in lowb:d]...)
             append!(full, U)
             pt_id = mons_of_deg_d(free_vars, d+1)
         end
-        println("computing GB...")
-        # gb_u = gens(groebner_basis_f4(ideal(R, vcat(gb, pt_id)),
-        #                               complete_reduction = true,
-        #                               info_level = 0))
-        gb_u = groebner(vcat(gb, pt_id), ordering = compute_ordering_gr)
-        println("computing staircase...")
+        println("computing truncated input GB...")
+        tim = @elapsed gb_u = groebner(vcat(ideal_gens, pt_id), ordering = compute_ordering_gr,
+                                       homogenize = :no)
+        println("time $(tim)")
+        println("computing staircase of input GB...")
         leadmons = (p -> leading_monomial(p, ordering=compute_ordering_osc)).(gb_u)
 
-        prev_length = length(drl_staircase)
-        staircase!(leadmons, drl_staircase, montree, one(R))
-        n_length = length(drl_staircase)
+        prev_length = length(input_staircase)
+        staircase!(leadmons, input_staircase, montree, one(R))
+        n_length = length(input_staircase)
         for j in prev_length+1:n_length
-            m = drl_staircase[j]
-            drl_staircase_flagmap[m] = false 
+            m = input_staircase[j]
+            input_staircase_flagmap[m] = false 
         end
 
-        println("computing lift normal forms...")
-        # lift_nfs = Oscar.reduce([f.curr for f in to_lift], gb_u)
-        lift_nfs = normalform(gb_u, [f.curr for f in to_lift],
-                              ordering = compute_ordering_gr, check = false)
-        # lift_nfs = Oscar.reduce([f.curr for f in to_lift], gb_u, ordering = compute_ordering_osc)
+        println("computing normal forms of elements to lift...")
+        tim = @elapsed lift_nfs = normalform(gb_u, [f.curr for f in to_lift],
+                                             ordering = compute_ordering_gr, check = false)
+        println("time: $(tim)")
         if test_lift
             empty!(to_del)
             println("testing for stability (normal form)")
@@ -354,30 +358,30 @@ function gen_fglm(I::Ideal{P};
         end
 
         slice = vcat([u .* target_staircase for u in U]...)
-        println("computing slice normal forms...")
-        # slice_nfs = Oscar.reduce(slice, gb_u, ordering = compute_ordering_osc)
-        slice_nfs = normalform(gb_u, slice, ordering = compute_ordering_gr, check = false)
+        println("computing normal forms of shifted staircase...")
+        tim = @elapsed slice_nfs = normalform(gb_u, slice, ordering = compute_ordering_gr, check = false)
+        println("time $(tim)")
         empty!(to_del)
         for (i, (sl, sl_nf)) in enumerate(zip(slice, slice_nfs))
             if sl_nf == sl
                 push!(to_del, i)
-                drl_staircase_flagmap[sl] = true
+                input_staircase_flagmap[sl] = true
             end
         end
         if length(to_del) != length(slice)
             println("non-trivial lift, dividing staircase...")
             triv_slice_part = slice[to_del]
-            println("computing remaining slice coeff vectors ($(length(slice)-length(to_del))/$(length(slice)))...")
+            println("computing remaining coefficient vectors of shifted staircase ($(length(slice)-length(to_del))/$(length(slice)))...")
             deleteat!(slice_nfs, to_del)
             deleteat!(slice, to_del)
-            staircase_rem = [k for k in keys(drl_staircase_flagmap) if !drl_staircase_flagmap[k]]
-            for k in keys(drl_staircase_flagmap)
-                drl_staircase_flagmap[k] = false
+            staircase_rem = [k for k in keys(input_staircase_flagmap) if !input_staircase_flagmap[k]]
+            for k in keys(input_staircase_flagmap)
+                input_staircase_flagmap[k] = false
             end
 
             C1 = coeff_vectors(gb_u, triv_slice_part, slice_nfs, is_reduced = true)
             C2 = coeff_vectors(gb_u, staircase_rem, slice_nfs, is_reduced = true)
-            println("computing lift coeff vectors...")
+            println("computing coefficient vectors of elements to lift...")
             D1 = coeff_vectors(gb_u, triv_slice_part, lift_nfs, is_reduced = true)
             D2 = coeff_vectors(gb_u, staircase_rem, lift_nfs, is_reduced = true)
             
@@ -395,18 +399,16 @@ function gen_fglm(I::Ideal{P};
             dens = 100 * nzsz/sz
             sze = size(transpose(CC2))
             @printf "lifting %i elements, mat of size %i x %i, density %2.2f%%\n" length(to_lift) sze[1] sze[2] dens
-            hassol, vs2 = can_solve_with_solution(transpose(CC2),transpose(DD2))
+            tim = @elapsed hassol, vs2 = can_solve_with_solution(transpose(CC2), transpose(DD2),
+                                                                 side = :right)
+            println("time $(tim)")
             !hassol && error("unliftable elements")
             if isempty(triv_slice_part)
-                # lifts = [sum(vs2[:, j] .* slice) for j in 1:length(to_lift)]
-                lifts = [sum([prod(a) for a in zip(vs2[:, j], slice)])
-                         for j in 1:length(to_lift)]
+                lifts = [sum(vs2[:, j] .* slice) for j in 1:length(to_lift)]
             else
                 vs1 = transpose(matrix(D1)) - transpose(matrix(C1)) * vs2
-                lifts = [sum([prod(a) for a in zip(vs1[:, j], triv_slice_part)]) + sum([prod(a) for a in zip(vs2[:, j], slice)])
+                lifts = [sum(vs1[:, j] .* triv_slice_part) + sum(vs2[:, j] .* slice)
                          for j in 1:length(to_lift)]
-                # lifts = [sum(vs1[:, j] .* triv_slice_part) + sum(vs2[:, j] .* slice)
-                #          for j in 1:length(to_lift)]
             end
         else
             println("trivial lifting step")
@@ -418,8 +420,8 @@ function gen_fglm(I::Ideal{P};
             empty!(to_del)
             n_stable_elements = 0
             n_tried = 0
-            println("testing stability (pade)")
-            for (j, f) in enumerate(to_lift)
+            println("testing stability (padé approximation)")
+            tim = @elapsed for (j, f) in enumerate(to_lift)
                 if all(!iszero, [p[1] for p in f.pades])
                     n_tried += 1
                     pss = [coeff(f.curr, n_free_vars, m)
@@ -442,7 +444,8 @@ function gen_fglm(I::Ideal{P};
                     end
                 end
             end
-            println("$(n_stable_elements)/$(n_tried) elements with stable pade approximation")
+            println("time: $(tim)")
+            println("$(n_stable_elements)/$(n_tried) elements with stable padé approximation")
             deleteat!(to_lift, to_del)
             deleteat!(lifts, to_del)
             isempty(to_lift) && break
@@ -452,10 +455,10 @@ function gen_fglm(I::Ideal{P};
         
         if !test_lift
             n_succ = 0
-            println("starting pade approximations for $(length(to_lift)) elements")
+            println("starting padé approximations for $(length(to_lift)) elements")
             i = findlast(m -> total_degree(m) <= d/2, full)
             half = full[1:i]
-            for f in to_lift
+            time = @elapsed for f in to_lift
                 pades = [pade(coeff(f.curr, n_free_vars, m),
                               full, half, pt_id)
                          for m in f.support]
@@ -463,7 +466,8 @@ function gen_fglm(I::Ideal{P};
                 n_succ += 1
                 f.pades = pades
             end
-            println("$(n_succ) elements with succesful pade approximation")
+            println("time: $(tim)")
+            println("$(n_succ) elements with successful padé approximation")
             mons = pt_id
             next_deg_mons = mons_of_deg_d(free_vars, d+2)
             lowb = d + 2
@@ -576,10 +580,7 @@ function coeff_vectors(gb::Vector{P},
                        F::Vector{P};
                        is_reduced = false) where {P <: POL}
     
-    # TODO: maybe normalform does not work
-    # nfs = normalform(gb, F, ordering = ordering)
     nfs = if !is_reduced
-        # Oscar.reduce(F, gb)
         normalform(gb, F, ordering = DegRevLex(), check = false)
     else
         F
@@ -597,10 +598,7 @@ function coeff_vectors(gb::Vector{P},
     
     field = base_ring(parent(first(F)))
     res = [zeros(field, vec_basis_length) for _ in 1:length(F)]
-    # TODO: maybe normalform does not work
-    # nfs = normalform(gb, F, ordering = ordering)
     nfs = if !is_reduced
-        # Oscar.reduce(F, gb)
         normalform(gb, F, ordering = DegRevLex(), check = false)
     else
         F
