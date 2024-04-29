@@ -336,8 +336,7 @@ function gen_fglm(I::Ideal{P};
         tim = @elapsed gb_u = if use_msolve
             gens(groebner_basis_f4(ideal(R, ideal_gens) + ideal(R, pt_id),
                                    eliminate = ngens(R) - num_free_vars,
-                                   complete_reduction = true,
-                                   info_level = 2))
+                                   complete_reduction = true))
         else
             groebner(vcat(ideal_gens, pt_id), ordering = compute_ordering_gr,
                      homogenize = :no)
