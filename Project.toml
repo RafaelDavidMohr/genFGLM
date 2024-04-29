@@ -5,6 +5,7 @@ version = "0.1.0"
 
 [deps]
 AbstractTrees = "1520ce14-60c1-5f80-bbc7-55ef81b5835c"
+AlgebraicSolving = "66b61cbe-0446-4d5d-9090-1ff510639f9d"
 Groebner = "0b43b601-686d-58a3-8a1c-6623616c7cd4"
 Oscar = "f1435218-dba5-11e9-1e4d-f1a5fab5fc13"
 Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"

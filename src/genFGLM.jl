@@ -3,6 +3,7 @@ module genFGLM
 using Reexport
 @reexport using Oscar
 using Groebner, AbstractTrees, Printf
+import AlgebraicSolving: _convert_finite_field_array_to_abstract_algebra
 
 export critical_points, cyclic, gen_fglm, ed_variety, rand_seq, rand_poly_dense, rand_poly_sparse 
 
@@ -265,10 +266,20 @@ function gen_fglm(I::Ideal{P};
     # ----
 
     # generators for input ideal, depending on input order
+    free_var_positions = [findfirst(v -> v == w, gens(R)) for w in free_vars]
+    num_free_vars = length(free_vars)
+    use_msolve = (last(free_var_positions) == ngens(R) &&
+                  first(free_var_positions) == ngens(R) - num_free_vars + 1)
+    println("using msolve: $(use_msolve)")
     if compute_full_input_gb && (compute_order == :elim || switch_to_generic)
         println("Computing full input GB")
-        tim = @elapsed ideal_gens = groebner(gens(I_new), ordering = compute_ordering_gr,
-                                             homogenize = :no)
+        tim = @elapsed ideal_gens = if use_msolve
+            gens(groebner_basis_f4(I_new, eliminate = ngens(R) - num_free_vars,
+                                   complete_reduction = true))
+        else
+            groebner(gens(I_new), ordering = compute_ordering_gr,
+                     homogenize = :no)
+        end
         println("time: $(tim)")
     else
         ideal_gens = gens(I_new)
@@ -278,7 +289,6 @@ function gen_fglm(I::Ideal{P};
     gb_1 = groebner(vcat(gens(I_new), free_vars), ordering = target_order_gr)
     target_staircase = staircase(gb_1, target_order_osc) 
     to_lift = candPol{typeof(first(gb_1))}[]
-    free_var_positions = [findfirst(v -> v == w, gens(R)) for w in free_vars]
     for (i, g) in enumerate(filter(g -> !(g in free_vars), gb_1))
         support = [deleteat!(e, free_var_positions) for e in exponents(g)]
         unique!(support)
@@ -323,8 +333,15 @@ function gen_fglm(I::Ideal{P};
             pt_id = mons_of_deg_d(free_vars, d+1)
         end
         println("computing truncated input GB...")
-        tim = @elapsed gb_u = groebner(vcat(ideal_gens, pt_id), ordering = compute_ordering_gr,
-                                       homogenize = :no)
+        tim = @elapsed gb_u = if use_msolve
+            gens(groebner_basis_f4(ideal(R, ideal_gens) + ideal(R, pt_id),
+                                   eliminate = ngens(R) - num_free_vars,
+                                   complete_reduction = true,
+                                   info_level = 2))
+        else
+            groebner(vcat(ideal_gens, pt_id), ordering = compute_ordering_gr,
+                     homogenize = :no)
+        end
         println("time $(tim)")
         println("computing staircase of input GB...")
         leadmons = (p -> leading_monomial(p, ordering=compute_ordering_osc)).(gb_u)
@@ -721,6 +738,45 @@ function rand_seq(nvars, deg, neqns; dense=true, nterms=10)
     sys = [dense ? rand_poly_dense(R, deg) : rand_poly_sparse(R, deg, nterms)
            for _ in 1:neqns]
     return ideal(R, sys)
+end
+
+function _convert_finite_field_array_to_abstract_algebra(
+        bld::Int32,
+        blen::Vector{Int32},
+        bcf::Vector{Int32},
+        bexp::Vector{Int32},
+        R::MPolyRing,
+        eliminate::Int=0
+        )
+
+    if characteristic(R) == 0
+        error("At the moment we only support finite fields.")
+    end
+
+    nr_gens = bld
+    nr_vars = nvars(R)
+    CR      = coefficient_ring(R)
+
+    basis = (typeof(R(0)))[]
+    #= basis = Vector{MPolyRingElem}(undef, bld) =#
+
+    len   = 0
+
+    for i in 1:nr_gens
+        if bcf[len+1] == 0
+            push!(basis, R(0))
+        else
+            g  = MPolyBuildCtx(R)
+            for j in 1:blen[i]
+                push_term!(g, CR(bcf[len+j]),
+                           convert(Vector{Int}, bexp[(len+j-1)*nr_vars+1:(len+j)*nr_vars]))
+            end
+            push!(basis, finish(g))
+        end
+        len +=  blen[i]
+    end
+
+    return basis
 end
 
 end # module genFGLM
