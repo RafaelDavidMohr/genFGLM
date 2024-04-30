@@ -626,10 +626,8 @@ function coeff_vectors(gb::Vector{P},
                        is_reduced = false) where {P <: POL}
     
     field = base_ring(parent(first(F)))
-    println("allocating $(vec_basis_length) x $(length(F))")
     res_alloc = zeros(Int, vec_basis_length, length(F))
     res = matrix(field, res_alloc)
-    println("done")
     nfs = if !is_reduced
         normalform(gb, F, ordering = ordering, check = false)
     else
