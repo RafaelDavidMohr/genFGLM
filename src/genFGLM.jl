@@ -85,7 +85,8 @@ function pade(r::P,
     redirect_stdout(devnull)
     vs = coeff_vectors(degd_pl_one_mons,
                        up_to_degd_mons,
-                       r .* up_to_half_degd_mons)
+                       r .* up_to_half_degd_mons,
+                       DegRevLex())
     redirect_stdout(oldstd)
 
     F = base_ring(parent(r))
@@ -94,7 +95,7 @@ function pade(r::P,
     l = length(up_to_degd_mons)
     zero_block = zero_matrix(F, l - k, k)
     right_block = vcat(id_block, zero_block)
-    m = hcat(transpose(matrix(F, vs)), right_block)
+    m = hcat(transpose(vs), right_block)
     K = kernel(m, side = :right)
     isempty(K) && return (zero(r), zero(r))
     q = sum([prod(a) for a in zip(K[1:k, 1], up_to_half_degd_mons)])
@@ -404,34 +405,35 @@ function gen_fglm(I::Ideal{P};
                 input_staircase_flagmap[k] = false
             end
 
-            C1 = coeff_vectors(gb_u, triv_slice_part, slice_nfs, is_reduced = true)
-            C2 = coeff_vectors(gb_u, staircase_rem, slice_nfs, is_reduced = true)
+            triv_slice_part_hm = Dict([(v, i) for (i, v) in enumerate(triv_slice_part)])
+            l1 = length(triv_slice_part)
+            staircase_rem_hm = Dict([(v, i) for (i, v) in enumerate(staircase_rem)])
+            l2 = length(staircase_rem)
+            C1 = coeff_vectors(gb_u, triv_slice_part_hm, l1, slice_nfs, compute_ordering_gr, is_reduced = true)
+            C2 = coeff_vectors(gb_u, staircase_rem_hm, l2, slice_nfs, compute_ordering_gr, is_reduced = true)
             println("computing coefficient vectors of elements to lift...")
-            D1 = coeff_vectors(gb_u, triv_slice_part, lift_nfs, is_reduced = true)
-            D2 = coeff_vectors(gb_u, staircase_rem, lift_nfs, is_reduced = true)
+            D1 = coeff_vectors(gb_u, triv_slice_part_hm, l1, lift_nfs, compute_ordering_gr, is_reduced = true)
+            D2 = coeff_vectors(gb_u, staircase_rem_hm, l2, lift_nfs, compute_ordering_gr, is_reduced = true)
             
-            FF = base_ring(R)
-            CC2 = matrix(FF, C2)
-            DD2 = matrix(FF, D2)
             sz = 0
             nzsz = 0
-            for x in CC2
+            for x in C2
                 sz += 1
                 if !iszero(x)
                     nzsz += 1
                 end
             end
             dens = 100 * nzsz/sz
-            sze = size(transpose(CC2))
+            sze = size(transpose(C2))
             @printf "lifting %i elements, mat of size %i x %i, density %2.2f%%\n" length(to_lift) sze[1] sze[2] dens
-            tim = @elapsed hassol, vs2 = can_solve_with_solution(transpose(CC2), transpose(DD2),
+            tim = @elapsed hassol, vs2 = can_solve_with_solution(C2, D2,
                                                                  side = :right)
             println("time $(tim)")
             !hassol && error("unliftable elements")
             if isempty(triv_slice_part)
                 lifts = [sum(vs2[:, j] .* slice) for j in 1:length(to_lift)]
             else
-                vs1 = transpose(matrix(D1)) - transpose(matrix(C1)) * vs2
+                vs1 = D1 - C1 * vs2
                 lifts = [sum(vs1[:, j] .* triv_slice_part) + sum(vs2[:, j] .* slice)
                          for j in 1:length(to_lift)]
             end
@@ -602,29 +604,34 @@ end
 # compute coeffs of F in terms of staircase
 function coeff_vectors(gb::Vector{P},
                        vec_basis::Vector{P},
-                       F::Vector{P};
+                       F::Vector{P},
+                       ordering;
                        is_reduced = false) where {P <: POL}
     
     nfs = if !is_reduced
-        normalform(gb, F, ordering = DegRevLex(), check = false)
+        normalform(gb, F, ordering = ordering, check = false)
     else
         F
     end
     res = [[coeff(g,m) for m in vec_basis] for g in nfs]
-    return res
+    return matrix(res)
 end
 
 # compute coeffs of F in terms of staircase
 function coeff_vectors(gb::Vector{P},
                        vec_basis_hmap::Dict{P, Int},
                        vec_basis_length::Int,
-                       F::Vector{P};
+                       F::Vector{P},
+                       ordering;
                        is_reduced = false) where {P <: POL}
     
     field = base_ring(parent(first(F)))
-    res = [zeros(field, vec_basis_length) for _ in 1:length(F)]
+    println("allocating $(vec_basis_length) x $(length(F))")
+    res_alloc = zeros(Int, vec_basis_length, length(F))
+    res = matrix(field, res_alloc)
+    println("done")
     nfs = if !is_reduced
-        normalform(gb, F, ordering = DegRevLex(), check = false)
+        normalform(gb, F, ordering = ordering, check = false)
     else
         F
     end
@@ -633,7 +640,8 @@ function coeff_vectors(gb::Vector{P},
         for t in terms(f)
             cf = coeff(t, 1)
             m = monomial(t, 1)
-            res[i][vec_basis_hmap[m]] = cf
+            !haskey(vec_basis_hmap, m) && continue
+            res[vec_basis_hmap[m], i] = cf
         end
     end
 
