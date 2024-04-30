@@ -209,6 +209,7 @@ function gen_fglm(I::Ideal{P};
                   ind_set = P[],
                   switch_to_generic = true,
                   compute_full_input_gb = false,
+                  just_hypersurface = false,
                   double_deg_bound = 0) where {P <: POL}
 
     !isempty(ind_set) && !switch_to_generic && error("can't do that")
@@ -290,11 +291,19 @@ function gen_fglm(I::Ideal{P};
     target_staircase = staircase(gb_1, target_order_osc) 
     to_lift = candPol{typeof(first(gb_1))}[]
     for (i, g) in enumerate(filter(g -> !(g in free_vars), gb_1))
+        if just_hypersurface
+            lm = leading_monomial(g, ordering=target_order_osc)
+            divvars = filter(v -> divides(lm, v)[1], n_free_vars)
+            if !(divvars == [n_free_vars[ln_free_vars]])
+                continue
+            end
+            println("hypersurface to lift: degree $(total_degree(g))")
+        end
         support = [deleteat!(e, free_var_positions) for e in exponents(g)]
         unique!(support)
         pades = [(zero(R), one(R)) for _ in 1:length(support)]
         push!(to_lift, candPol(g, copy(support), copy(pades)))
-    end
+    end   
     # ----
 
     # input staircase
